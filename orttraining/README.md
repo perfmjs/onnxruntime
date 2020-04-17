@@ -38,7 +38,7 @@ sudo ldconfig
 
 ```
 export CUDA_HOME=<location for CUDA libs> # e.g. /usr/local/cuda
-export CUDNN_HOME=<location for cuDNN libs> # e.g. /usr/local/cuda
+export CUDNN_HOME=<location for cuDNN libs> # e.g. /usr/local/cudnn_7.6.2/cuda
 export CUDACXX=<location for NVCC> #e.g. /usr/local/cuda/bin/nvcc
 export PATH=<location for openmpi/bin/>:$PATH
 export LD_LIBRARY_PATH=<location for openmpi/lib/>:$LD_LIBRARY_PATH
