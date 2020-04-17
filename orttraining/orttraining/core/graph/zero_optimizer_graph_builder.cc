@@ -175,6 +175,10 @@ static ArgDef AddPartitionForParameter(
   size_t element_count = partition_shape.Size();
   initializer_partition.set_raw_data(initializer_data + partition_offset, element_count * sizeof(float));
 
+  // Clear the initializer shape, as we are replacing the weight with a segment of the real weight.
+  NodeArg* initializer_arg = graph.GetNodeArg(initializer_name);
+  initializer_arg->ClearShape();
+
   graph.RemoveInitializedTensor(initializer_name);
   graph.AddInitializedTensor(initializer_partition);
 
@@ -194,7 +198,7 @@ static Status PartitionParameters(
     std::vector<ArgDef>& weight_argdefs,
     std::vector<ArgDef>& gradient_argdefs) {
   // Find index of segment that is enabled for this rank.
-  int partition_index = std::distance(enabled.begin(), std::find(enabled.begin(), enabled.end(), true));
+  int64_t partition_index = std::distance(enabled.begin(), std::find(enabled.begin(), enabled.end(), true));
 
   // Add View for gradient, and keep the gradient segment for this rank.
   std::vector<ArgDef> gradient_views = AddViewForParameter(graph_defs, gradient_argdef, view_shapes);
