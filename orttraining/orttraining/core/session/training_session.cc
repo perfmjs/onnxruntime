@@ -448,6 +448,15 @@ Status TrainingSession::AddMemorySwap(int min_topo_distance) {
     graph_transformation_mgr.Register(std::move(rule_transformer_L1), TransformerLevel::Level1);
 
     ORT_RETURN_IF_ERROR(graph_transformation_mgr.ApplyTransformers(graph, TransformerLevel::Level1, *session_logger_));
+
+    std::cout << "Topo order after memory swap:" << std::endl;
+    GraphViewer gv(graph);
+    for (auto i : gv.GetNodesInTopologicalOrder()) {
+      std::cout << gv.GetNode(i)->OpType() << ": " << gv.GetNode(i)->OutputDefs()[0]->Name() << std::endl;
+    }
+    std::cout << std::endl
+              << std::endl;
+
   } catch (const OnnxRuntimeException& exp) {
     return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Failed to add memory swap:", exp.what());
   }

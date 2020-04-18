@@ -36,6 +36,7 @@ bool MemorySwapRewriter::AddSwap(Graph& graph, Node& src_node) const {
                                        {&swap_in_arg},
                                        {},
                                        kMSDomain);
+    graph.AddEdge(swap_out_node.Index(), swap_in_node.Index(), 0, 0);
     // explicitly put swap_in/out nodes on CPU EP to avoid being optimized out
     swap_out_node.SetExecutionProviderType(kCpuExecutionProvider);
     swap_in_node.SetExecutionProviderType(kCpuExecutionProvider);
@@ -61,26 +62,21 @@ bool MemorySwapRewriter::AddSwap(Graph& graph, Node& src_node) const {
       if (dst_node) {
         // remove edge from src_node to dst_node
         graph.RemoveEdge(src_node.Index(), dst_node->Index(), src_node_output_idx, dst_arg_idx);
-        // add edge from swap_in to dst_node
-        graph.AddEdge(swap_in_node.Index(), dst_node->Index(), 0, dst_arg_idx);
         // add swap_in control edges to make sure swap_in happens last in all dst_node's inputs
         for (auto iter_swap_in = dst_node->InputEdgesBegin(); iter_swap_in != dst_node->InputEdgesEnd(); ++iter_swap_in) {
-          if (iter_swap_in->GetNode().Index() != swap_in_node.Index()) {
-            graph.AddControlEdge(iter_swap_in->GetNode().Index(), swap_in_node.Index());
-          }
+          graph.AddControlEdge(iter_swap_in->GetNode().Index(), swap_in_node.Index());
         }
+        // add edge from swap_in to dst_node
+        graph.AddEdge(swap_in_node.Index(), dst_node->Index(), 0, dst_arg_idx);
       }
     } while (dst_node != nullptr);
 
-    // add edges in graph
-    graph.AddEdge(src_node.Index(), swap_out_node.Index(), src_node_output_idx, 0);
-    graph.AddEdge(swap_out_node.Index(), swap_in_node.Index(), 0, 0);
     // add swap_out control edges to make sure swap_out happens first in all src_node's outputs
     for (auto iter_swap_out = src_node.OutputEdgesBegin(); iter_swap_out != src_node.OutputEdgesEnd(); ++iter_swap_out) {
-      if (iter_swap_out->GetNode().Index() != swap_out_node.Index()) {
-        graph.AddControlEdge(swap_out_node.Index(), iter_swap_out->GetNode().Index());
-      }
+      graph.AddControlEdge(swap_out_node.Index(), iter_swap_out->GetNode().Index());
     }
+    // add edges in graph
+    graph.AddEdge(src_node.Index(), swap_out_node.Index(), src_node_output_idx, 0);
 
     ++src_node_output_idx;
   }
@@ -93,7 +89,8 @@ std::vector<std::string> MemorySwapRewriter::TargetOpTypes() const noexcept {
 
 Status MemorySwapRewriter::Apply(Graph& graph, Node& node, RewriteRuleEffect& rule_effect, const logging::Logger& /*logger*/) const {
   if (AddSwap(graph, node)) {
-    rule_effect = RewriteRuleEffect::kModifiedRestOfGraph;
+    // we need to fake the effect to avoid graph::Resolve, which may get rid of control edges
+    rule_effect = RewriteRuleEffect::kNone;
   }
   return Status::OK();
 }
