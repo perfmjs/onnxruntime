@@ -90,6 +90,13 @@ class TrainingSession : public InferenceSession {
     // If not provided, GIST is disabled.
     optional<GistConfiguration> gist_config{};
 
+    struct MemorySwapConfiguration {
+      bool swap_output_of_matmul_with_initializer;
+    };
+    // The memory swap configuration.
+    // If not provided, memory swap is disabled.
+    optional<MemorySwapConfiguration> memswap_config{};
+
     struct TensorboardConfiguration {
       // The summary name.
       std::string summary_name{};
@@ -248,6 +255,8 @@ class TrainingSession : public InferenceSession {
       std::string& actual_loss_name);
 
   common::Status AddGistEncoding();
+
+  common::Status AddMemorySwap();
 
   /** Add tensorboard summary nodes to the graph.
   @param summary_name name for the merged summary node.

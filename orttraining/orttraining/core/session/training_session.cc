@@ -22,6 +22,9 @@
 //Gist Encoding
 #include "orttraining/core/optimizer/gist_encode_decode.h"
 
+//Memory Swap
+#include "orttraining/core/optimizer/memory_swap_rewriter.h"
+
 #ifdef USE_CUDA
 #include "core/providers/cuda/cuda_common.h"
 #include "core/providers/cuda/cuda_allocator.h"
@@ -242,6 +245,11 @@ Status TrainingSession::ConfigureForTraining(
     ORT_RETURN_IF_ERROR(AddGistEncoding());
   }
 
+  // add memory swap
+  if (config.memswap_config.has_value()) {
+    ORT_RETURN_IF_ERROR(AddMemorySwap());
+  }
+
   if (IsRootNode(config) && config.model_with_training_graph_path.has_value()) {
     ORT_IGNORE_RETURN_VALUE(Save(
         config.model_with_training_graph_path.value(), SaveOption::NO_RELOAD));
@@ -426,6 +434,22 @@ Status TrainingSession::AddGistEncoding() {
     ORT_RETURN_IF_ERROR(graph_transformation_mgr.ApplyTransformers(graph, TransformerLevel::Level1, *session_logger_));
   } catch (const OnnxRuntimeException& exp) {
     return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Failed to add Gist Encoding:", exp.what());
+  }
+  return DoPostLoadProcessing(*model_);
+}
+
+Status TrainingSession::AddMemorySwap() {
+  try {
+    Graph& graph = model_->MainGraph();
+
+    auto rule_transformer_L1 = onnxruntime::make_unique<RuleBasedGraphTransformer>("RuleMemSwapTransformer1");
+    rule_transformer_L1->Register(onnxruntime::make_unique<MemorySwapRewriter>());
+    onnxruntime::GraphTransformerManager graph_transformation_mgr{1};
+    graph_transformation_mgr.Register(std::move(rule_transformer_L1), TransformerLevel::Level1);
+
+    ORT_RETURN_IF_ERROR(graph_transformation_mgr.ApplyTransformers(graph, TransformerLevel::Level1, *session_logger_));
+  } catch (const OnnxRuntimeException& exp) {
+    return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Failed to add memory swap:", exp.what());
   }
   return DoPostLoadProcessing(*model_);
 }

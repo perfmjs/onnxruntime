@@ -77,7 +77,7 @@ static Status BuildBackPropGraph(
  * @return TrainingSession for this run.
  */
 static std::unique_ptr<TrainingSession> RunTrainingSessionWithChecks(
-    const SessionOptions& so, const PathString& backprop_model_file) {
+    const SessionOptions& so, const PathString& backprop_model_file, bool use_cuda = false) {
   std::unique_ptr<Environment> env;
   EXPECT_TRUE(Environment::Create(nullptr, env).IsOK());
 
@@ -90,6 +90,15 @@ static std::unique_ptr<TrainingSession> RunTrainingSessionWithChecks(
   EXPECT_TRUE(res.second != nullptr);
   auto model_metadata = res.second;
   std::cout << "Loaded " << model_metadata->graph_name << '\n';
+
+#ifdef USE_CUDA
+  if (use_cuda) {
+    CUDAExecutionProviderInfo xp_info;
+    EXPECT_TRUE(training_session->RegisterExecutionProvider(onnxruntime::make_unique<CUDAExecutionProvider>(xp_info)).IsOK());
+  }
+#else
+  ORT_UNUSED_PARAMETER(use_cuda);
+#endif
 
   EXPECT_TRUE(training_session->Initialize().IsOK());
 
@@ -202,6 +211,19 @@ TEST(GradientGraphBuilderTest, TrainingSession_WithGist) {
 
   SessionOptions so{};
   RunTrainingSessionWithChecks(so, backprop_model_file);
+}
+
+TEST(GradientGraphBuilderTest, TrainingSession_WithMemSwap) {
+  auto config = MakeBasicTrainingConfig();
+  // config to enable memory swap
+  config.memswap_config = TrainingSession::TrainingConfiguration::MemorySwapConfiguration{};
+  config.memswap_config.value().swap_output_of_matmul_with_initializer = true;
+
+  PathString backprop_model_file;
+  ASSERT_STATUS_OK(BuildBackPropGraph(ORIGINAL_MODEL_PATH, config, backprop_model_file));
+
+  SessionOptions so{};
+  RunTrainingSessionWithChecks(so, backprop_model_file, /*use_cuda*/ true);
 }
 
 TEST(GradientGraphBuilderTest, TrainingSession_WithLogging) {
@@ -486,6 +508,10 @@ TEST(GradientGraphBuilderTest, TrainingSession_BertToy) {
       {"Add", {{1, 1.0f}, {1, 9.999999960041972e-13f}}},
       {"Mul", {{1, 0.5f}, {1, -10000.0f}}},
       {"Sub", {{0, 1.0f}}}};
+
+  // config to enable memory swap
+  config.memswap_config = TrainingSession::TrainingConfiguration::MemorySwapConfiguration{};
+  config.memswap_config.value().swap_output_of_matmul_with_initializer = true;
 
   PathString backprop_model_file;
   ASSERT_STATUS_OK(BuildBackPropGraph(model_path, config, backprop_model_file));
