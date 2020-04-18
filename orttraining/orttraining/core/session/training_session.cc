@@ -449,6 +449,9 @@ Status TrainingSession::AddMemorySwap(int min_topo_distance) {
 
     ORT_RETURN_IF_ERROR(graph_transformation_mgr.ApplyTransformers(graph, TransformerLevel::Level1, *session_logger_));
 
+    // uncomment this and control edge is gone
+    //graph.Resolve();
+
     std::cout << "Topo order after memory swap:" << std::endl;
     GraphViewer gv(graph);
     for (auto i : gv.GetNodesInTopologicalOrder()) {
