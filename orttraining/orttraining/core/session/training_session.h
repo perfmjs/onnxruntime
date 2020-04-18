@@ -91,7 +91,7 @@ class TrainingSession : public InferenceSession {
     optional<GistConfiguration> gist_config{};
 
     struct MemorySwapConfiguration {
-      bool swap_output_of_matmul_with_initializer;
+      int min_topo_distance{10};
     };
     // The memory swap configuration.
     // If not provided, memory swap is disabled.
@@ -256,7 +256,10 @@ class TrainingSession : public InferenceSession {
 
   common::Status AddGistEncoding();
 
-  common::Status AddMemorySwap();
+  /** Add memory swap to graph.
+  @param min_topo_distance minimal distance in topological sort to enable memory swap.
+  */
+  common::Status AddMemorySwap(int min_topo_distance);
 
   /** Add tensorboard summary nodes to the graph.
   @param summary_name name for the merged summary node.

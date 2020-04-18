@@ -1663,6 +1663,29 @@ Return true if all elements are true and false otherwise.
           propagateShapeFromInputToOutput(ctx, i + 1, i);
         }
       });
+
+  ONNX_CONTRIB_OPERATOR_SCHEMA(SwapToCPU)
+      .SetDomain(kMSDomain)
+      .SinceVersion(1)
+      .SetSupportLevel(OpSchema::SupportType::EXPERIMENTAL)
+      .SetDoc("Swap tensor from GPU to CPU.")
+      .Input(
+          0,
+          "InputData",
+          "input data.",
+          "T")
+      .Output(
+          0,
+          "OutputData",
+          "Output data.",
+          "T")
+      .TypeConstraint(
+          "T",
+          OpSchema::all_tensor_types(),
+          "Allow inputs and outputs to be any kind of tensor.")
+      .TypeAndShapeInferenceFunction([](ONNX_NAMESPACE::InferenceContext& ctx) {
+        propagateShapeAndTypeFromFirstInput(ctx);
+      });
 }
 }  // namespace training
 }  // namespace onnxruntime

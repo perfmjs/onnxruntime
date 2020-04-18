@@ -217,7 +217,7 @@ TEST(GradientGraphBuilderTest, TrainingSession_WithMemSwap) {
   auto config = MakeBasicTrainingConfig();
   // config to enable memory swap
   config.memswap_config = TrainingSession::TrainingConfiguration::MemorySwapConfiguration{};
-  config.memswap_config.value().swap_output_of_matmul_with_initializer = true;
+  config.memswap_config.value().min_topo_distance = 1;
 
   PathString backprop_model_file;
   ASSERT_STATUS_OK(BuildBackPropGraph(ORIGINAL_MODEL_PATH, config, backprop_model_file));
@@ -511,7 +511,6 @@ TEST(GradientGraphBuilderTest, TrainingSession_BertToy) {
 
   // config to enable memory swap
   config.memswap_config = TrainingSession::TrainingConfiguration::MemorySwapConfiguration{};
-  config.memswap_config.value().swap_output_of_matmul_with_initializer = true;
 
   PathString backprop_model_file;
   ASSERT_STATUS_OK(BuildBackPropGraph(model_path, config, backprop_model_file));

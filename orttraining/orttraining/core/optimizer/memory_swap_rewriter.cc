@@ -9,76 +9,120 @@
 
 namespace onnxruntime {
 
-bool MemorySwapRewriter::AddSwapInOut(Graph& graph, Node& curr_node) const {
-  ORT_UNUSED_PARAMETER(graph);
-  ORT_UNUSED_PARAMETER(curr_node);
-#if 0
-  ONNX_NAMESPACE::TypeProto bool_tensor;
-  bool_tensor.mutable_tensor_type()->set_elem_type(ONNX_NAMESPACE::TensorProto_DataType_BOOL);
+const Graph* MemorySwapRewriter::last_graph_ = nullptr;
+std::unordered_map<NodeIndex, int> MemorySwapRewriter::topo_indices_;
 
-  if (curr_node.GetOutputEdgesCount() < 1) {
-    return false;
-  }
+static bool IsBackwardNode(const Node& node) {
+  return node.Description() == "Backward pass";
+}
 
-  std::vector<GraphEdgeHelper> output_edges = GetNodeOutputEdges(curr_node);
+bool MemorySwapRewriter::AddSwap(Graph& graph, Node& src_node) const {
+  int src_node_output_idx = 0;
+  for (auto output_def : src_node.OutputDefs()) {
+    NodeArg* src_node_output_arg = const_cast<NodeArg*>(output_def);
+    auto& swap_out_arg = graph.GetOrCreateNodeArg(src_node_output_arg->Name() + "_memswap_out", src_node_output_arg->TypeAsProto());
+    auto& swap_in_arg = graph.GetOrCreateNodeArg(src_node_output_arg->Name() + "_memswap_in", src_node_output_arg->TypeAsProto());
+    auto& swap_out_node = graph.AddNode(src_node_output_arg->Name() + "_swapout",
+                                        "SwapToCPU",
+                                        "",
+                                        {src_node_output_arg},
+                                        {&swap_out_arg},
+                                        {},
+                                        kMSDomain);
+    auto& swap_in_node = graph.AddNode(src_node_output_arg->Name() + "_swapin",
+                                       "SwapToCPU",
+                                       "Backward pass",
+                                       {&swap_out_arg},
+                                       {&swap_in_arg},
+                                       {},
+                                       kMSDomain);
+    // explicitly put swap_in/out nodes on CPU EP to avoid being optimized out
+    swap_out_node.SetExecutionProviderType(kCpuExecutionProvider);
+    swap_in_node.SetExecutionProviderType(kCpuExecutionProvider);
 
-  auto curr_node_output_defs = curr_node.OutputDefs();
-  auto curr_node_output_def_name = curr_node_output_defs[0]->Name();
-  auto* curr_node_output_arg = graph.GetNodeArg(curr_node_output_def_name);
+    // process output edges from this output_def
+    // note this needs to happen before linking src_node with swap_out_node
+    const Node* dst_node = nullptr;
+    int dst_arg_idx = 0;
+    do {
+      dst_node = nullptr;
+      // note: this loop needs to separate from editing that affects OutputEdges container
+      for (auto iter = src_node.OutputEdgesBegin(); iter != src_node.OutputEdgesEnd(); ++iter) {
+        if (iter->GetSrcArgIndex() != src_node_output_idx)
+          continue;
 
-  std::string encode_node_name = graph.GenerateNodeName(MEMORY_SWAP_OUT_NODE_NAME_BASE);
-  for (int i = 0; i < curr_node_output_arg->Shape()->dim_size(); i++) {
-    bool_tensor.mutable_tensor_type()->mutable_shape()->add_dim()->set_dim_value(curr_node_output_arg->Shape()->dim(i).dim_value());
-  }
-  auto& encode_output_def_compressed_arg = graph.GetOrCreateNodeArg(encode_node_name, &bool_tensor);
-  auto& encode_output_def_uncompressed_arg = graph.GetOrCreateNodeArg(encode_node_name + "_identity", curr_node_output_arg->TypeAsProto());
-  auto& encode = graph.AddNode(encode_node_name, compression_type + "Encoder", "Encode", {curr_node_output_arg}, {&encode_output_def_uncompressed_arg, &encode_output_def_compressed_arg}, {}, kMSDomain);
-
-  std::string decode_arg_name = graph.GenerateNodeName(MEMORY_SWAP_IN_NODE_NAME_BASE);
-  auto& decode_output_def_uncompressed_arg = graph.GetOrCreateNodeArg(decode_arg_name, curr_node_output_arg->TypeAsProto());
-  auto& decode_output_def_dummy_arg = graph.GetOrCreateNodeArg(decode_arg_name + "_late_dec", curr_node_output_arg->TypeAsProto());
-  auto& decode = graph.AddNode(decode_arg_name, compression_type + "Decoder", "Decode", {&decode_output_def_dummy_arg, &encode_output_def_compressed_arg}, {&decode_output_def_uncompressed_arg}, {}, kMSDomain);
-
-  bool early_encoding = false;
-  bool late_decoding = false;
-  for (auto& output_edge : output_edges) {
-    Node* node_dst = graph.GetNode(output_edge.dst_node);
-    if (node_dst->Description() == "Backward pass" && (node_dst->OpType() == "ReluGrad")) {
-      graph.AddEdge(output_edge.src_node, encode.Index(), output_edge.src_arg_index, 0);
-      graph.AddEdge(encode.Index(), decode.Index(), 1, 1);
-      graph.AddEdge(decode.Index(), output_edge.dst_node, 0, output_edge.dst_arg_index);
-      std::vector<GraphEdgeHelper> input_edges_dst = GetNodeInputEdges(*node_dst);
-      size_t i = 0;
-      while (!late_decoding && i < input_edges_dst.size()) {
-        if (graph.GetNode(input_edges_dst[i].src_node)->OpType() != curr_node.OpType()) {
-          graph.AddEdge(input_edges_dst[i].src_node, decode.Index(), input_edges_dst[i].src_arg_index, 0);
-          late_decoding = true;
+        if (IsBackwardNode(iter->GetNode())) {
+          dst_node = &iter->GetNode();
+          dst_arg_idx = iter->GetDstArgIndex();
+          break;
         }
-        i++;
       }
-    } else if (!early_encoding) {
-      graph.AddEdge(encode.Index(), output_edge.dst_node, 0, output_edge.dst_arg_index);
-      early_encoding = true;
+
+      if (dst_node) {
+        // remove edge from src_node to dst_node
+        graph.RemoveEdge(src_node.Index(), dst_node->Index(), src_node_output_idx, dst_arg_idx);
+        // add edge from swap_in to dst_node
+        graph.AddEdge(swap_in_node.Index(), dst_node->Index(), 0, dst_arg_idx);
+        // add swap_in control edges to make sure swap_in happens last in all dst_node's inputs
+        for (auto iter_swap_in = dst_node->InputEdgesBegin(); iter_swap_in != dst_node->InputEdgesEnd(); ++iter_swap_in) {
+          if (iter_swap_in->GetNode().Index() != swap_in_node.Index()) {
+            graph.AddControlEdge(iter_swap_in->GetNode().Index(), swap_in_node.Index());
+          }
+        }
+      }
+    } while (dst_node != nullptr);
+
+    // add edges in graph
+    graph.AddEdge(src_node.Index(), swap_out_node.Index(), src_node_output_idx, 0);
+    graph.AddEdge(swap_out_node.Index(), swap_in_node.Index(), 0, 0);
+    // add swap_out control edges to make sure swap_out happens first in all src_node's outputs
+    for (auto iter_swap_out = src_node.OutputEdgesBegin(); iter_swap_out != src_node.OutputEdgesEnd(); ++iter_swap_out) {
+      if (iter_swap_out->GetNode().Index() != swap_out_node.Index()) {
+        graph.AddControlEdge(swap_out_node.Index(), iter_swap_out->GetNode().Index());
+      }
     }
+
+    ++src_node_output_idx;
   }
-#endif
   return true;
 }
 
 std::vector<std::string> MemorySwapRewriter::TargetOpTypes() const noexcept {
-  return {"MatMul"};  // only rewrite MatMul for now
+  return {};  // apply for all nodes
 }
 
 Status MemorySwapRewriter::Apply(Graph& graph, Node& node, RewriteRuleEffect& rule_effect, const logging::Logger& /*logger*/) const {
-  if (AddSwapInOut(graph, node)) {
+  if (AddSwap(graph, node)) {
     rule_effect = RewriteRuleEffect::kModifiedRestOfGraph;
   }
   return Status::OK();
 }
 
 bool MemorySwapRewriter::SatisfyCondition(const Graph& graph, const Node& node, const logging::Logger& /*logger*/) const {
-  ORT_UNUSED_PARAMETER(graph);
-  ORT_UNUSED_PARAMETER(node);
+  // only check forward nodes
+  if (IsBackwardNode(node))
+    return false;
+
+  if (last_graph_ != &graph) {
+    last_graph_ = &graph;
+
+    topo_indices_.clear();
+    GraphViewer graph_viewer(graph);
+    int topo_index = 0;
+    for (const auto index : graph_viewer.GetNodesInTopologicalOrder()) {
+      topo_indices_.insert(std::make_pair(index, topo_index++));
+    }
+  }
+
+  // check if the node has one output going to a backward
+  int fw_topo_idx = topo_indices_[node.Index()];
+  for (auto iter = node.OutputEdgesBegin(); iter != node.OutputEdgesEnd(); ++iter) {
+    if (IsBackwardNode(iter->GetNode())) {
+      int bw_topo_idx = topo_indices_[iter->GetNode().Index()];
+      if (bw_topo_idx - fw_topo_idx > min_topo_distance_)
+        return true;
+    }
+  }
   return false;
 }
 

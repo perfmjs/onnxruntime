@@ -247,7 +247,7 @@ Status TrainingSession::ConfigureForTraining(
 
   // add memory swap
   if (config.memswap_config.has_value()) {
-    ORT_RETURN_IF_ERROR(AddMemorySwap());
+    ORT_RETURN_IF_ERROR(AddMemorySwap(config.memswap_config.value().min_topo_distance));
   }
 
   if (IsRootNode(config) && config.model_with_training_graph_path.has_value()) {
@@ -438,12 +438,12 @@ Status TrainingSession::AddGistEncoding() {
   return DoPostLoadProcessing(*model_);
 }
 
-Status TrainingSession::AddMemorySwap() {
+Status TrainingSession::AddMemorySwap(int min_topo_distance) {
   try {
     Graph& graph = model_->MainGraph();
 
     auto rule_transformer_L1 = onnxruntime::make_unique<RuleBasedGraphTransformer>("RuleMemSwapTransformer1");
-    rule_transformer_L1->Register(onnxruntime::make_unique<MemorySwapRewriter>());
+    rule_transformer_L1->Register(onnxruntime::make_unique<MemorySwapRewriter>(min_topo_distance));
     onnxruntime::GraphTransformerManager graph_transformation_mgr{1};
     graph_transformation_mgr.Register(std::move(rule_transformer_L1), TransformerLevel::Level1);
 
