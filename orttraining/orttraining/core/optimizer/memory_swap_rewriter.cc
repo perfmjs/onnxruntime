@@ -77,6 +77,8 @@ Status MemorySwapRewriter::Apply(Graph& graph, Node& node, RewriteRuleEffect& ru
 }
 
 bool MemorySwapRewriter::SatisfyCondition(const Graph& graph, const Node& node, const logging::Logger& /*logger*/) const {
+  ORT_UNUSED_PARAMETER(graph);
+  ORT_UNUSED_PARAMETER(node);
   return false;
 }
 
