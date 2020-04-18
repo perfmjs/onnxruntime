@@ -148,7 +148,7 @@ static int64_t OffsetForPartition(const std::vector<TensorShape>& shapes, const 
   ORT_THROW("Failed to partition initializer.");
 }
 
-static ArgDef AddPartitionForParameter(
+static std::vector<ArgDef> AddPartitionForParameter(
     Graph& graph,
     GraphAugmenter::GraphDefs& graph_defs,
     const std::string& initializer_name,
@@ -182,8 +182,13 @@ static ArgDef AddPartitionForParameter(
   graph.RemoveInitializedTensor(initializer_name);
   graph.AddInitializedTensor(initializer_partition);
 
+  // TODO: this is terribly hacky.  Fix the ZeRO partitioning code ...
   auto dtype = static_cast<ONNX_NAMESPACE::TensorProto_DataType>(tensor_proto->data_type());
-  return ArgDef(initializer_name, graph_defs.CreateTypeProto(partition_shape.GetDims(), dtype));
+  std::vector<ArgDef> views;
+  for (size_t i = 0; i < enabled.size(); i++) {
+    views.push_back(ArgDef(initializer_name, graph_defs.CreateTypeProto(partition_shape.GetDims(), dtype)));
+  }
+  return views;
 }
 
 static Status PartitionParameters(
@@ -198,11 +203,11 @@ static Status PartitionParameters(
     std::vector<ArgDef>& weight_argdefs,
     std::vector<ArgDef>& gradient_argdefs) {
   // Find index of segment that is enabled for this rank.
-  int64_t partition_index = std::distance(enabled.begin(), std::find(enabled.begin(), enabled.end(), true));
+  //int64_t partition_index = std::distance(enabled.begin(), std::find(enabled.begin(), enabled.end(), true));
 
   // Add View for gradient, and keep the gradient segment for this rank.
   std::vector<ArgDef> gradient_views = AddViewForParameter(graph_defs, gradient_argdef, view_shapes);
-  gradient_argdefs.push_back(gradient_views[partition_index]);
+  gradient_argdefs.insert(gradient_argdefs.end(), gradient_views.begin(), gradient_views.end());
 
   // Add View or partition weights, and keep the weight segments for this rank.
   std::vector<ArgDef> fp16_weight_views;
@@ -210,20 +215,22 @@ static Status PartitionParameters(
     ArgDef fp16_weight_argdef(opt_config.fp16_weight_arg->Name(), opt_config.fp16_weight_arg->TypeAsProto());
     fp16_weight_views = AddViewForParameter(graph_defs, fp16_weight_argdef, view_shapes);
 
-    auto new_weight_argdef = AddPartitionForParameter(graph, graph_defs, weight_argdef.name, view_shapes, enabled);
-    weight_argdefs.push_back(new_weight_argdef);
+    auto weight_views = AddPartitionForParameter(graph, graph_defs, weight_argdef.name, view_shapes, enabled);
+    weight_argdefs.insert(weight_argdefs.end(), weight_views.begin(), weight_views.end());
   } else {
     std::vector<ArgDef> weight_views = AddViewForParameter(graph_defs, weight_argdef, view_shapes);
-    weight_argdefs.push_back(weight_views[partition_index]);
+    weight_argdefs.insert(weight_argdefs.end(), weight_views.begin(), weight_views.end());
   }
 
   // Update Optimizer node config.
-  OptimizerNodeConfig new_config = opt_config;
-  new_config.enabled = true;
-  if (opt_config.fp16_weight_arg != nullptr) {
-    new_config.fp16_weight_arg = &graph.GetOrCreateNodeArg(fp16_weight_views[partition_index].name, fp16_weight_views[partition_index].type_proto);
+  for (size_t i = 0; i < gradient_views.size(); i++) {
+    OptimizerNodeConfig new_config = opt_config;
+    new_config.enabled = enabled[i];
+    if (opt_config.fp16_weight_arg != nullptr) {
+      new_config.fp16_weight_arg = &graph.GetOrCreateNodeArg(fp16_weight_views[i].name, fp16_weight_views[i].type_proto);
+    }
+    opt_configs.push_back(new_config);
   }
-  opt_configs.push_back(new_config);
 
   return Status::OK();
 }
