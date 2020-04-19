@@ -111,6 +111,15 @@ bool IsRootNode(const TrainingSession::TrainingConfiguration& config) {
 }
 }  // namespace
 
+TrainingSession::TrainingSession(const SessionOptions& session_options, const Environment& env)
+    : InferenceSession(session_options, env) {
+  // the rewriter needs to be registered for runtime rewrite of control edges
+  // since model save/load would discard control edge info
+  auto rule_transformer_L1 = onnxruntime::make_unique<RuleBasedGraphTransformer>("RuleMemSwapTransformer1");
+  rule_transformer_L1->Register(onnxruntime::make_unique<AddControlEdgeForMemorySwapRewriter>());
+  RegisterGraphTransformer(std::unique_ptr<GraphTransformer>(rule_transformer_L1.release()), TransformerLevel::Level1);
+}
+
 Status TrainingSession::ConfigureForTraining(
     const TrainingConfiguration& config, TrainingConfigurationResult& config_result_out) {
   ORT_RETURN_IF(
@@ -441,25 +450,11 @@ Status TrainingSession::AddGistEncoding() {
 Status TrainingSession::AddMemorySwap(int min_topo_distance) {
   try {
     Graph& graph = model_->MainGraph();
-
     auto rule_transformer_L1 = onnxruntime::make_unique<RuleBasedGraphTransformer>("RuleMemSwapTransformer1");
     rule_transformer_L1->Register(onnxruntime::make_unique<MemorySwapRewriter>(min_topo_distance));
     onnxruntime::GraphTransformerManager graph_transformation_mgr{1};
     graph_transformation_mgr.Register(std::move(rule_transformer_L1), TransformerLevel::Level1);
-
     ORT_RETURN_IF_ERROR(graph_transformation_mgr.ApplyTransformers(graph, TransformerLevel::Level1, *session_logger_));
-
-    // uncomment this and control edge is gone
-    //graph.Resolve();
-
-    std::cout << "Topo order after memory swap:" << std::endl;
-    GraphViewer gv(graph);
-    for (auto i : gv.GetNodesInTopologicalOrder()) {
-      std::cout << gv.GetNode(i)->OpType() << ": " << gv.GetNode(i)->OutputDefs()[0]->Name() << std::endl;
-    }
-    std::cout << std::endl
-              << std::endl;
-
   } catch (const OnnxRuntimeException& exp) {
     return ORT_MAKE_STATUS(ONNXRUNTIME, FAIL, "Failed to add memory swap:", exp.what());
   }

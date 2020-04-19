@@ -10,7 +10,7 @@ namespace onnxruntime {
 /**
 @Class MemorySwapRewriter
 
-Rewrite rule for memory swap.
+Rewrite rule for adding memory swap nodes.
 */
 class MemorySwapRewriter : public RewriteRule {
  public:
@@ -19,7 +19,9 @@ class MemorySwapRewriter : public RewriteRule {
         min_topo_distance_(min_topo_distance) {
   }
 
-  std::vector<std::string> TargetOpTypes() const noexcept override;
+  std::vector<std::string> TargetOpTypes() const noexcept override {
+    return {};  // enable for all nodes
+  }
 
  private:
   bool SatisfyCondition(const Graph& graph, const Node& node, const logging::Logger& logger) const override;
@@ -28,9 +30,29 @@ class MemorySwapRewriter : public RewriteRule {
   bool AddSwap(Graph& graph, Node& curr_node) const;
 
   int min_topo_distance_;
+};
 
-  static const Graph* last_graph_;
-  static std::unordered_map<NodeIndex, int> topo_indices_;
+/**
+@Class MemorySwapControlEdgesRewriter
+
+Rewrite rule for restoring control edges for memory swap nodes after loading.
+*/
+class AddControlEdgeForMemorySwapRewriter : public RewriteRule {
+ public:
+  AddControlEdgeForMemorySwapRewriter() noexcept
+      : RewriteRule("MemorySwapControlEdgeRestore") {
+  }
+
+  std::vector<std::string> TargetOpTypes() const noexcept override {
+    return {"SwapToCPU"};
+  }
+
+ private:
+  bool SatisfyCondition(const Graph& /*graph*/, const Node& /*node*/, const logging::Logger& /*logger*/) const override {
+    return true;
+  }
+
+  Status Apply(Graph& graph, Node& node, RewriteRuleEffect& rule_effect, const logging::Logger& logger) const override;
 };
 
 }  // namespace onnxruntime
