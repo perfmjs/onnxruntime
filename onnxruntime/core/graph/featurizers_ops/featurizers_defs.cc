@@ -494,6 +494,7 @@ void RegisterForecastingPivotFeaturizerVer1(){
   MS_FEATURIZERS_OPERATOR_SCHEMA(ForecastingPivotTransformer)
       .SinceVersion(1)
       .SetDomain(kMSFeaturizersDomain)
+      .Attr("block_pos", "TODO:", AttributeProto::INT, static_cast<int64_t>(2))
       .Input(
           0,
           "State",

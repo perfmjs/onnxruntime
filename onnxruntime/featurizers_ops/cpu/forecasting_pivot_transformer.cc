@@ -15,7 +15,7 @@ namespace featurizers {
 
 template <typename T>
 struct ForecastingPivotTransformerImpl {
-  void operator()(OpKernelContext* ctx) const {
+  void operator()(OpKernelContext* ctx, int block_pos) const {
     using MatrixT = NS::RowMajMatrix<typename NS::Traits<T>::nullable_type>;
     using InputType = std::vector<Eigen::Map<const MatrixT>>;
     using OutputType = std::vector<T>;
@@ -45,7 +45,7 @@ struct ForecastingPivotTransformerImpl {
     const int input_node_0_count = ctx->NumVariadicInputs(0);
     const int input_node_1_count = ctx->NumVariadicInputs(1);
 
-    int block_pos = 2;
+    //int block_pos = 2;
 
     InputType input;
     input.reserve(block_pos);
@@ -112,16 +112,19 @@ struct ForecastingPivotTransformerImpl {
 
 class ForecastingPivotTransformer final : public OpKernel {
  public:
-  explicit ForecastingPivotTransformer(const OpKernelInfo& info) : OpKernel(info) {
+  explicit ForecastingPivotTransformer(const OpKernelInfo& info) :
+    OpKernel(info), _block_pos(info.GetAttrOrDefault("block_pos", static_cast<int64_t>(0))) {
   }
 
   Status Compute(OpKernelContext* ctx) const override {
     utils::MLTypeCallDispatcher<ForecastingPivotTransformerImpl, float, double>
         t_disp(ctx->Input<Tensor>(1)->GetElementType());
-    t_disp.Invoke(ctx);
+    t_disp.Invoke(ctx, _block_pos);
 
     return Status::OK();
   }
+ private:
+  const int64_t _block_pos;
 };
 
 ONNX_OPERATOR_KERNEL_EX(
