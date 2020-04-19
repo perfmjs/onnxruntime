@@ -43,7 +43,7 @@ TEST(FeaturizersTests, ForecastingPivotTransformer_2_Inputs) {
                                               2, NS::Traits<float>::CreateNullValue(), 3, 4,
                                               2, NS::Traits<float>::CreateNullValue(), 5, 6,
                                               2, NS::Traits<float>::CreateNullValue(), 3, 4});
-  test.AddOutput<double>("Output", {4, 5}, {3, 5, 7, 5, 3,
+  test.AddOutput<double>("Output_1", {4, 1, 5}, {3, 5, 7, 5, 3,
                                             9, 8, 10, 6, 4,
                                             3, 5, 7, 5, 3,
                                             9, 8, 10, 6, 4});
@@ -66,12 +66,22 @@ TEST(FeaturizersTests, ForecastingPivotTransformer_3_Inputs) {
                                               2, NS::Traits<float>::CreateNullValue(), 3, 4,
                                               2, NS::Traits<float>::CreateNullValue(), 5, 6,
                                               2, NS::Traits<float>::CreateNullValue(), 3, 4});
-  test.AddInput<double>("Input_3", {2, 1, 4}, {0, 0, 0, 0,
-                                               0, 0, 0, 0});
-  test.AddOutput<double>("Output", {4, 6}, {3, 5, 7, 5, 3, 0,
-                                            9, 8, 10, 6, 4, 0,
-                                            3, 5, 7, 5, 3, 0,
-                                            9, 8, 10, 6, 4, 0});
+  test.AddInput<double>("Input_3", {2, 1, 4}, {7, 7, 7, 7,
+                                               9, 9, 9, 9});
+  test.AddInput<double>("Input_4", {2, 1, 4}, {-7, -7, -7, -7,
+                                               -9, -9, -9, -9});
+  test.AddOutput<double>("Output_1", {4, 1, 5}, {3, 5, 7, 5, 3,
+                                                 9, 8, 10, 6, 4,
+                                                 3, 5, 7, 5, 3,
+                                                 9, 8, 10, 6, 4});
+  test.AddOutput<double>("Output_2", {4, 1, 4}, {7, 7, 7, 7,
+                                                 7, 7, 7, 7,
+                                                 9, 9, 9, 9,
+                                                 9, 9, 9, 9});
+  test.AddOutput<double>("Output_3", {4, 1, 4}, {-7, -7, -7, -7,
+                                                 -7, -7, -7, -7,
+                                                 -9, -9, -9, -9,
+                                                 -9, -9, -9, -9});
 
   test.Run();
 }

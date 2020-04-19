@@ -33,21 +33,27 @@ struct ForecastingPivotTransformerImpl {
 
     //Get the output for whole rows is inevitable because there is conceptually no way to determine the shape of output for each row
     std::vector<OutputType> output;
+    std::vector<int64_t> row_idx_record;
+    int64_t row_idx = 0;
     std::function<void(OutputType const & value)> callback_fn;
-    callback_fn = [&output](OutputType const & value) -> void {
+    callback_fn = [&output, &row_idx_record, &row_idx](OutputType const & value) -> void {
       output.emplace_back(value);
+      row_idx_record.push_back(row_idx);
     };
 
     // Transform
     const int input_node_0_count = ctx->NumVariadicInputs(0);
     const int input_node_1_count = ctx->NumVariadicInputs(1);
+
+    int block_pos = 2;
+
     InputType input;
-    input.reserve(input_node_1_count);
+    input.reserve(block_pos);
     std::unordered_map<int, std::tuple<const T*,int64_t, int64_t>> dataPtrMap;
-    for (int64_t row_idx = 0; row_idx < row_num; ++row_idx) {
+    for (row_idx = 0; row_idx < row_num; ++row_idx) {
       //Prepare Input and Output
       input.clear();
-      for (int index = input_node_0_count; index < input_node_0_count + input_node_1_count; ++index) {
+      for (int index = input_node_0_count; index < input_node_0_count + block_pos; ++index) {
         if (row_idx == 0) {
           //Get the Input
           const auto* input_tensor(ctx->Input<Tensor>(index));
@@ -72,13 +78,35 @@ struct ForecastingPivotTransformerImpl {
     }
     transformer.flush(callback_fn);
 
-    // Prepare the Output
-    TensorShape output_shape({static_cast<int64_t>(output.size()), static_cast<int64_t>(output[0].size())});
+    // Prepare the pivoted Output
+    TensorShape output_shape({static_cast<int64_t>(output.size()), 1, static_cast<int64_t>(output[0].size())});
     Tensor* output_tensor(ctx->Output(0, output_shape));
     T* output_data = output_tensor->MutableData<T>();
 
-    for (OutputType const & row : output)
+    for (OutputType const & row : output) {
       output_data = std::copy(row.begin(), row.end(), output_data);
+    }
+
+    // Prepare the imputed Output
+    for (int i = 0; i < input_node_1_count - block_pos; i++) {
+      const auto* input_tensor(ctx->Input<Tensor>(input_node_0_count + block_pos + i));
+      const T* input_data(input_tensor->template Data<T>());
+
+      const int64_t input_dim_1 = input_tensor->Shape()[1];
+      const int64_t input_dim_2 = input_tensor->Shape()[2];
+      const int64_t input_matrix_size = input_dim_1 * input_dim_2;
+
+      TensorShape output_shape_imputed({static_cast<int64_t>(row_idx_record.size()), input_dim_1, input_dim_2});
+      Tensor* output_tensor_imputed(ctx->Output(i + 1, output_shape_imputed));
+      T* output_data_imputed = output_tensor_imputed->MutableData<T>();
+
+      for (int j = 0; j < static_cast<int>(row_idx_record.size()); j++) {
+        output_data_imputed = std::copy(input_data + row_idx_record[j] * input_matrix_size,
+                                        input_data + (row_idx_record[j] + 1) * input_matrix_size,
+                                        output_data_imputed);
+      }
+    }
+
   }
 };
 

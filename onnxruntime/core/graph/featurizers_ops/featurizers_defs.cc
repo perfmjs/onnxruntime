@@ -509,7 +509,8 @@ void RegisterForecastingPivotFeaturizerVer1(){
           0,
           "Output",
           "No information is available",
-          "T")
+          "T",
+          ONNX_NAMESPACE::OpSchema::FormalParameterOption::Variadic)
       .TypeConstraint(
           "T0",
           {"tensor(uint8)"},
@@ -533,6 +534,7 @@ void RegisterForecastingPivotFeaturizerVer1(){
               }
             }
             ONNX_NAMESPACE::TensorShapeProto shape;
+            shape.add_dim();
             shape.add_dim();
             shape.add_dim();
             ONNX_NAMESPACE::updateOutputShape(ctx, 0, shape);
