@@ -13,7 +13,16 @@ static bool IsBackwardNode(const Node& node) {
   return node.Description() == "Backward pass";
 }
 
-bool MemorySwapRewriter::AddSwap(Graph& graph, Node& src_node) const {
+static void ComputeTopoIndices(const Graph& graph, std::unordered_map<NodeIndex, int>& topo_indices) {
+  topo_indices.clear();
+  GraphViewer graph_viewer(graph);
+  int topo_index = 0;
+  for (const auto index : graph_viewer.GetNodesInTopologicalOrder()) {
+    topo_indices.insert(std::make_pair(index, topo_index++));
+  }
+}
+
+Status MemorySwapRewriter::Apply(Graph& graph, Node& src_node, RewriteRuleEffect& rule_effect, const logging::Logger& /*logger*/) const {
   int src_node_output_idx = 0;
   for (auto output_def : src_node.OutputDefs()) {
     NodeArg* src_node_output_arg = const_cast<NodeArg*>(output_def);
@@ -66,14 +75,7 @@ bool MemorySwapRewriter::AddSwap(Graph& graph, Node& src_node) const {
 
     ++src_node_output_idx;
   }
-  return true;
-}
-
-Status MemorySwapRewriter::Apply(Graph& graph, Node& node, RewriteRuleEffect& rule_effect, const logging::Logger& /*logger*/) const {
-  if (AddSwap(graph, node)) {
-    // we need to fake the effect to avoid graph::Resolve, which may get rid of control edges
-    rule_effect = RewriteRuleEffect::kModifiedRestOfGraph;
-  }
+  rule_effect = RewriteRuleEffect::kModifiedRestOfGraph;
   return Status::OK();
 }
 
@@ -86,12 +88,7 @@ bool MemorySwapRewriter::SatisfyCondition(const Graph& graph, const Node& node, 
   static std::unordered_map<NodeIndex, int> topo_indices;
   if (last_graph != &graph) {
     last_graph = &graph;
-    topo_indices.clear();
-    GraphViewer graph_viewer(graph);
-    int topo_index = 0;
-    for (const auto index : graph_viewer.GetNodesInTopologicalOrder()) {
-      topo_indices.insert(std::make_pair(index, topo_index++));
-    }
+    ComputeTopoIndices(graph, topo_indices);
   }
 
   // check if the node has one output going to a backward
@@ -106,37 +103,42 @@ bool MemorySwapRewriter::SatisfyCondition(const Graph& graph, const Node& node, 
   return false;
 }
 
+bool AddControlEdgeForMemorySwapRewriter::SatisfyCondition(const Graph& /*graph*/, const Node& node, const logging::Logger& /*logger*/) const {
+  // only add control edge for forward graph
+  // backward is OK because topological sort uses reverse DFS
+  return !IsBackwardNode(node);
+}
+
 Status AddControlEdgeForMemorySwapRewriter::Apply(Graph& graph, Node& node, RewriteRuleEffect& rule_effect, const logging::Logger& /*logger*/) const {
-  if (IsBackwardNode(node)) {
-    // MemSwapToCPU in backward, need to make sure it happens as late as possible
-    Node::EdgeSet input_peers;
-    for (auto out_iter = node.OutputEdgesBegin(); out_iter != node.OutputEdgesEnd(); ++out_iter) {
-      const Node& dst_node = out_iter->GetNode();
-      for (auto iter = dst_node.InputEdgesBegin(); iter != dst_node.InputEdgesEnd(); ++iter) {
-        if (iter->GetNode().Index() == node.Index())
-          continue;
-        input_peers.insert(*iter);
+  static const Graph* last_graph = nullptr;
+  static std::unordered_map<NodeIndex, int> topo_indices;
+  if (last_graph != &graph) {
+    last_graph = &graph;
+    ComputeTopoIndices(graph, topo_indices);
+  }
+
+  // SwapToCPU in forward, need to make sure it happens as early as possible
+  int min_topo_index = INT_MAX;
+  NodeIndex peer_node_index = 0;
+  for (auto in_iter = node.InputEdgesBegin(); in_iter != node.InputEdgesEnd(); ++in_iter) {
+    const Node& src_node = in_iter->GetNode();
+    for (auto iter = src_node.OutputEdgesBegin(); iter != src_node.OutputEdgesEnd(); ++iter) {
+      const auto& peer_node = iter->GetNode();
+      if (peer_node.Index() == node.Index()) {
+        continue;
       }
-    }
-    for (const auto& edge : input_peers) {
-      graph.AddControlEdge(edge.GetNode().Index(), node.Index());
-    }
-  } else {
-    // MemSwapToCPU in forward, need to make sure it happens as early as possible
-    Node::EdgeSet output_peers;
-    for (auto in_iter = node.InputEdgesBegin(); in_iter != node.InputEdgesEnd(); ++in_iter) {
-      const Node& src_node = in_iter->GetNode();
-      for (auto iter = src_node.OutputEdgesBegin(); iter != src_node.OutputEdgesEnd(); ++iter) {
-        if (iter->GetNode().Index() == node.Index())
-          continue;
-        output_peers.insert(*iter);
+
+      int topo_index = topo_indices[peer_node.Index()];
+      if (topo_index < min_topo_index) {
+        min_topo_index = topo_index;
+        peer_node_index = peer_node.Index();
       }
-    }
-    for (const auto& edge : output_peers) {
-      graph.AddControlEdge(node.Index(), edge.GetNode().Index());
     }
   }
-  rule_effect = RewriteRuleEffect::kModifiedRestOfGraph;
+  if (min_topo_index < INT_MAX) {
+    graph.AddControlEdge(node.Index(), peer_node_index);
+    rule_effect = RewriteRuleEffect::kModifiedRestOfGraph;
+  }
   return Status::OK();
 }
 

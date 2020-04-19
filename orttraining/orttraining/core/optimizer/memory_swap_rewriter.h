@@ -25,9 +25,7 @@ class MemorySwapRewriter : public RewriteRule {
 
  private:
   bool SatisfyCondition(const Graph& graph, const Node& node, const logging::Logger& logger) const override;
-
   Status Apply(Graph& graph, Node& node, RewriteRuleEffect& rule_effect, const logging::Logger& logger) const override;
-  bool AddSwap(Graph& graph, Node& curr_node) const;
 
   int min_topo_distance_;
 };
@@ -48,10 +46,7 @@ class AddControlEdgeForMemorySwapRewriter : public RewriteRule {
   }
 
  private:
-  bool SatisfyCondition(const Graph& /*graph*/, const Node& /*node*/, const logging::Logger& /*logger*/) const override {
-    return true;
-  }
-
+  bool SatisfyCondition(const Graph& graph, const Node& node, const logging::Logger& logger) const override;
   Status Apply(Graph& graph, Node& node, RewriteRuleEffect& rule_effect, const logging::Logger& logger) const override;
 };
 

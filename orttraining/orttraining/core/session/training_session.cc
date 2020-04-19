@@ -452,6 +452,7 @@ Status TrainingSession::AddMemorySwap(int min_topo_distance) {
     Graph& graph = model_->MainGraph();
     auto rule_transformer_L1 = onnxruntime::make_unique<RuleBasedGraphTransformer>("RuleMemSwapTransformer1");
     rule_transformer_L1->Register(onnxruntime::make_unique<MemorySwapRewriter>(min_topo_distance));
+    rule_transformer_L1->Register(onnxruntime::make_unique<AddControlEdgeForMemorySwapRewriter>());
     onnxruntime::GraphTransformerManager graph_transformation_mgr{1};
     graph_transformation_mgr.Register(std::move(rule_transformer_L1), TransformerLevel::Level1);
     ORT_RETURN_IF_ERROR(graph_transformation_mgr.ApplyTransformers(graph, TransformerLevel::Level1, *session_logger_));
